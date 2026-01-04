@@ -70,8 +70,8 @@ Installation and Running Steps
     * (Optional) Google Sheets
 6. Execute manually for testing or wait for automatic execution at 9:00 AM daily
 
-Demonstration Results
-(Please insert 3–5 screenshots of actually generated memes here, preferably with before-and-after comparisons of original photos)
+Demo video
+https://youtu.be/BnLEU5WHFsA
 
 Major Challenges Encountered and Solutions
 
