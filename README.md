@@ -34,6 +34,22 @@ Technical Highlights and Solutions
 * Instagram Publishing Shows Pure White Images: Enforce center cropping, fixed 1080×1080 size, and optimized JPEG parameters (quality=95, optimize, progressive)
 * High-Resolution Original Image Processing: Add center cropping logic to prevent stretching distortion
 
+Advanced AI Enhancement: Model Fine-tuning (Step 5)
+Why Fine-tuning?
+While the base Mistral-7B model can generate generic captions, it often lacks the specific humor style and cultural relevance needed for viral memes. Our fine-tuning process transforms it into a specialized meme caption expert.
+
+Training Process
+(https://colab.research.google.com/drive/1HjSDF11PEHuvUY_CFtQN6QRuzX9NDqxK?usp=sharing)
+
+Technical Implementation:
+Method: LoRA (Low-Rank Adaptation) - trains only 0.1% of parameters
+Base Model: Mistral-7B-Instruct-v0.1
+Training Data: 50 curated meme samples (image descriptions + humorous captions)
+Platform: Google Colab with free T4 GPU
+Training Time: 2 hours
+Model Size: ~4GB (4-bit quantized)
+
+
 Environment Requirements
 * Docker and Docker Compose
 * Host machine recommended to have at least 16 GB RAM (required for running Ollama Vision models)
