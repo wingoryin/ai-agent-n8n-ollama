@@ -1,0 +1,1202 @@
+{
+  "name": "Meme Generator 6",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        144,
+        -320
+      ],
+      "id": "647e9d26-c535-4638-96a2-fe4cc569b598",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * 🚀 修正版：自動適配 Google Drive 列表輸出格式\n */\n\n// 1. 初始化變量\nconst allInputs = $input.all();\nlet files = [];\n\nconsole.log(`收到 ${allInputs.length} 個輸入項目`);\n\ntry {\n    // 🔍 策略 A: 檢查第一個項目的 json 內是否有 files 陣列 (這是你目前的狀況)\n    if (allInputs[0].json && Array.isArray(allInputs[0].json.files)) {\n        files = allInputs[0].json.files;\n        console.log(\"偵測到格式：Standard Google Drive List (files array)\");\n    } \n    // 🔍 策略 B: 檢查輸入本身是否就是多個獨立項目 (如果之前用了 Item Lists 節點)\n    else if (allInputs.length > 1) {\n        files = allInputs.map(item => item.json);\n        console.log(\"偵測到格式：Split Items (multiple n8n items)\");\n    }\n    // 🔍 策略 C: 檢查 json 本身是否為陣列\n    else if (Array.isArray(allInputs[0].json)) {\n        files = allInputs[0].json;\n        console.log(\"偵測到格式：Simple Array\");\n    }\n\n    // 2. 如果還是找不到 files，拋出錯誤\n    if (!files || files.length === 0) {\n        throw new Error(\"找不到任何檔案數據，請檢查 Google Drive 節點輸出\");\n    }\n\n    // 3. 過濾圖片並排除已生成的 Meme\n    const validImages = files.filter(file => {\n        const isImage = file.mimeType && file.mimeType.startsWith('image/');\n        const isNotMeme = file.name && !file.name.toLowerCase().startsWith('meme_');\n        const isNotFolder = file.mimeType !== 'application/vnd.google-apps.folder';\n        return isImage && isNotMeme && isNotFolder;\n    });\n\n    console.log(`過濾後剩下 ${validImages.length} 個有效圖片`);\n\n    if (validImages.length === 0) {\n        return [{ json: { error: \"沒有找到符合條件的原始圖片 (已排除 meme_ 開頭的檔案)\" } }];\n    }\n\n    // 4. 隨機或按順序取前 3 個，並生成正確的 URL\n    // 注意：Google Drive 直接連結需要檔案設為「知道連結的人均可查看」\n    const results = validImages.slice(0, 3).map((file, index) => {\n        return {\n            json: {\n                id: file.id,\n                fileId: file.id,\n                name: file.name,\n                mimeType: file.mimeType,\n                // 下面這個 URL 是供外部服務（如 Ollama/ImgBB）嘗試抓取\n                photoUrl: `https://drive.google.com/uc?export=view&id=${file.id}`,\n                downloadUrl: `https://drive.google.com/uc?export=download&id=${file.id}`,\n                index: index,\n                processedAt: new Date().toISOString()\n            }\n        };\n    });\n\n    return results;\n\n} catch (err) {\n    console.error(\"腳本執行失敗:\", err.message);\n    return [{ json: { error: err.message, stack: err.stack } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -320
+      ],
+      "id": "b7b2f2a9-5acd-421d-afca-0839741ac6d1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "type": "random"
+      },
+      "type": "n8n-nodes-base.sort",
+      "typeVersion": 1,
+      "position": [
+        1456,
+        -320
+      ],
+      "id": "5389686a-855b-4a1c-a2e1-f8996a417d01",
+      "name": "Sort"
+    },
+    {
+      "parameters": {
+        "maxItems": 10
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        -320
+      ],
+      "id": "31f655c9-32ab-4654-b779-23c78fd94971",
+      "name": "Limit"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        2320,
+        -32
+      ],
+      "id": "1bf00748-db96-4950-89d0-c63ef77f2a3e"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// 節點名稱：Code in JavaScript1 (準備 AI 數據)\n// 位置：Loop Over Items → 這個節點 → HTTP Request2 (Ollama Vision)\n// 作用：確保傳給 Ollama 的圖片連結有效\n// ============================================\n\nconsole.log(\"=== 準備數據給 Ollama Vision ===\");\n\n// 檢查關鍵欄位\nif (!$json.photoUrl) {\n  console.error(\"❌ 錯誤：photoUrl 為空\");\n  console.log(\"當前數據:\", JSON.stringify($json, null, 2));\n  \n  // 嘗試使用 baseUrl 作為備用\n  if ($json.baseUrl) {\n    console.log(\"⚠️ 使用 baseUrl 作為備用\");\n    return {\n      ...$json,\n      photoUrl: $json.baseUrl,\n      usingFallback: true\n    };\n  }\n  \n  // 如果都沒有，返回錯誤標記\n  return {\n    ...$json,\n    error: \"沒有有效的圖片連結\",\n    meme_score: 0\n  };\n}\n\n// 驗證連結格式\nconsole.log(`圖片連結: ${$json.photoUrl}`);\nconsole.log(`檔案名稱: ${$json.name}`);\n\n// 如果是 Google Drive 連結，確保是正確格式\nif ($json.photoUrl.includes('drive.google.com')) {\n  console.log(\"⚠️ Google Drive 連結，檢查格式...\");\n  \n  // 應該是縮圖格式，不是下載格式\n  if ($json.photoUrl.includes('/uc?')) {\n    console.log(\"❌ 可能是需要授權的下載連結\");\n    console.log(\"建議使用 thumbnailLink 格式\");\n  }\n}\n\n// 返回給 Ollama Vision\nreturn $json;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        -464
+      ],
+      "id": "e00a65a8-a5e9-4a91-a059-290e677b71c3",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9c6125f8-3acd-4e87-ae45-7a3e0831dcfe",
+              "leftValue": "={{ $json.meme_score }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3856,
+        -464
+      ],
+      "id": "5e41ca10-3c4c-4176-821c-2b38e1dd3bd4",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === 第 17 節點：Select Best Caption (完美對接版) ===\nconst item = $input.first();\n\n// 1. 獲取 Ollama 的排名回覆 (例如 \"1\")\nconst rankingResponse = item.json.response || \"\";\n\n// 2. 獲取標題陣列 - 使用最精準的節點引用方式\nlet captions = [];\ntry {\n  // 注意：這裡的名字必須與你畫面上第 15 節點顯示的名稱一模一樣\n  // 如果你的節點名稱真的是 \"Parse Captions\"，下面這行就沒問題\n  const sourceNode = $(\"Parse Captions\"); \n  captions = sourceNode.item.json.captions || [];\n  console.log('成功從 Parse Captions 獲取標題數量:', captions.length);\n} catch (e) {\n  console.error(\"無法找到 Parse Captions 節點，嘗試從當前輸入尋找備份...\");\n  captions = item.json.captions || [];\n}\n\ntry {\n  // 使用正則表達式提取數字 0-4\n  const numberMatch = rankingResponse.match(/[0-4]/);\n  let bestIndex = 0;\n  \n  if (numberMatch) {\n    bestIndex = parseInt(numberMatch[0]);\n  }\n\n  // 3. 安全檢查：如果沒抓到標題，給出緊急保底，避免流程崩潰\n  if (!captions || captions.length === 0) {\n    console.warn(\"警告: 標題列表為空，使用緊急保底文字\");\n    captions = [\"Meme Data Error\", \"Check Parse Node\", \"Caption Not Found\"];\n  }\n\n  // 確保索引不超出陣列範圍\n  if (bestIndex < 0 || bestIndex >= captions.length) {\n    bestIndex = 0;\n  }\n  \n  const bestCaption = captions[bestIndex];\n  \n  // 4. 返回最終結果，並確保傳遞 Binary (圖片)\n  return {\n    json: {\n      ...item.json,\n      best_index: bestIndex,\n      best_caption: bestCaption, // 這裡會是真正的標題內容\n      status: (bestCaption === \"Meme Data Error\") ? \"warning\" : \"success\"\n    },\n    // 【極重要】將圖片數據傳給後面的 PIL 節點\n    binary: item.binary \n  };\n  \n} catch (error) {\n  console.error('Select Best Caption 執行錯誤:', error);\n  return {\n    json: { \n      ...item.json, \n      best_caption: \"Final Error Fallback\", \n      error: error.message \n    },\n    binary: item.binary\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4752,
+        -464
+      ],
+      "id": "00cf881d-41a3-4896-9910-21cfdfaa409b",
+      "name": "Select Best Caption"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.2:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral:7b\",\n  \"prompt\": {{ \n    JSON.stringify(\n      \"You are a meme expert. Below are 5 candidate captions. Rank them and output ONLY the index number (0, 1, 2, 3, or 4) of the best one.\\n\\n\" + \n      $json.captions.map((c, i) => i + \": \" + c).join(\"\\n\") + \n      \"\\n\\nBest index:\"\n    ) \n  }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.3,\n    \"num_predict\": 10\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        4528,
+        -464
+      ],
+      "id": "c936630c-7dbe-4b6c-94fa-bf5007b16f33",
+      "name": "Rank Best Caption"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析標題生成結果\nconst item = $input.first();\n\nif (!item || !item.json) {\n  return {\n    json: {\n      ...$json,\n      caption_error: 'No response from caption generation',\n      captions: [\"Caption generation failed\"],\n      captions_count: 0\n    }\n  };\n}\n\nconst response = item.json.response || item.json;\nconsole.log('標題生成原始響應:', response.substring(0, 150) + '...');\n\ntry {\n  // 方法1：嘗試提取JSON數組\n  const jsonMatch = response.match(/\\[[\\s\\S]*\\]/);\n  \n  if (jsonMatch) {\n    const captions = JSON.parse(jsonMatch[0]);\n    \n    if (Array.isArray(captions) && captions.length > 0) {\n      return {\n        json: {\n          ...$json,\n          captions_raw: response,\n          captions: captions,\n          captions_count: captions.length,\n          caption_success: true\n        }\n      };\n    }\n  }\n  \n  // 方法2：如果不是JSON，嘗試按行分割\n  const lines = response.split('\\n')\n    .map(line => line.trim())\n    .filter(line => \n      line.length > 0 && \n      !line.startsWith('[') && \n      !line.startsWith('{') &&\n      !line.includes('```') &&\n      line.length < 100\n    );\n  \n  // 取前5行作為標題\n  const captions = lines.slice(0, 5);\n  \n  if (captions.length > 0) {\n    return {\n      json: {\n        ...$json,\n        captions_raw: response,\n        captions: captions,\n        captions_count: captions.length,\n        caption_success: true,\n        note: 'Extracted from text lines'\n      }\n    };\n  }\n  \n  // 方法3：最後的備選方案\n  const defaultCaptions = [\n    \"When you realize it's Monday tomorrow\",\n    \"My brain during meetings\",\n    \"Trying to adult but failing\",\n    \"That moment when...\",\n    \"My energy levels right now\"\n  ];\n  \n  return {\n    json: {\n      ...$json,\n      captions_raw: response,\n      captions: defaultCaptions,\n      captions_count: defaultCaptions.length,\n      caption_success: false,\n      note: 'Using default captions'\n    }\n  };\n  \n} catch (error) {\n  console.error('解析標題失敗:', error);\n  \n  return {\n    json: {\n      ...$json,\n      caption_error: error.message,\n      captions: [\"Error: \" + error.message.substring(0, 30)],\n      captions_count: 1,\n      caption_success: false\n    }\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4304,
+        -464
+      ],
+      "id": "54562723-0d5d-4b85-b275-204c678ac629",
+      "name": "Parse Captions"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.2:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral:7b\",\n  \"prompt\": \"Generate 5 short, funny, relatable meme captions in Gen-Z style for this photo description: {{ $json.meme_description.replace(/\"/g, '\\\\\"') }}\\n\\nMake them sarcastic, self-deprecating, or highly relatable. Number them 1 to 5. Keep each caption short (under 15 words). Only output the numbered list, no extra text.\",\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.9,\n    \"num_predict\": 300\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        4080,
+        -464
+      ],
+      "id": "00bb1cd5-b130-4a6c-8a2d-621e2743de73",
+      "name": "Generate Meme Captions"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "from PIL import Image, ImageDraw, ImageFont\nfrom io import BytesIO\nimport base64\n\nitems = _input.all()\noutput_items = []\n\nfor item in items:\n    json_data = dict(item.json)\n    caption = json_data.get('best_caption', 'NO CAPTION').upper()\n\n    image_bytes = None\n\n    # 從 Set Fields 傳落嚟嘅 base64 取原圖\n    try:\n        b64_string = json_data.get('original_image_base64')\n        if b64_string:\n            if ',' in b64_string:  # 清除可能有嘅 header\n                b64_string = b64_string.split(',')[1]\n            image_bytes = base64.b64decode(b64_string)\n            print(f\"✅ 成功從 json.original_image_base64 取圖，長度={len(image_bytes)} bytes\")\n    except Exception as e:\n        print(f\"❌ base64 解碼失敗: {str(e)}\")\n\n    try:\n        if image_bytes and len(image_bytes) > 5000:\n            # 載入原圖並轉 RGB\n            img = Image.open(BytesIO(image_bytes)).convert('RGB')\n            print(f\"原始圖片載入成功，大小: {img.size}\")\n\n            # === 關鍵：先裁剪成正方形（中心 crop），避免變形 ===\n            width, height = img.size\n            size = min(width, height)\n            left = (width - size) // 2\n            top = (height - size) // 2\n            img = img.crop((left, top, left + size, top + size))\n\n            # === 再 resize 到 IG 最佳 1080x1080 ===\n            img = img.resize((1080, 1080), Image.Resampling.LANCZOS)\n\n            # 加文字\n            draw = ImageDraw.Draw(img)\n\n            # 字體（盡量大）\n            try:\n                font = ImageFont.truetype(\"arial.ttf\", 100)\n            except:\n                try:\n                    font = ImageFont.truetype(\"DejaVuSans-Bold.ttf\", 100)\n                except:\n                    font = ImageFont.load_default()\n                    print(\"⚠️ 使用預設字體\")\n\n            # 底部置中\n            bbox = draw.textbbox((0, 0), caption, font=font)\n            text_width = bbox[2] - bbox[0]\n            text_height = bbox[3] - bbox[1]\n            position = ((1080 - text_width) // 2, 1080 - text_height - 60)\n\n            # 經典黑邊白字\n            stroke = 8\n            for x in range(-stroke, stroke + 1):\n                for y in range(-stroke, stroke + 1):\n                    if x != 0 or y != 0:\n                        draw.text((position[0] + x, position[1] + y), caption, font=font, fill=\"black\")\n            draw.text(position, caption, font=font, fill=\"white\")\n\n            # === IG 最佳 JPEG 保存參數 ===\n            out = BytesIO()\n            img.save(\n                out,\n                format=\"JPEG\",\n                quality=95,\n                optimize=True,\n                progressive=True,\n                subsampling=0\n            )\n            final_bytes = out.getvalue()\n            print(f\"✅ meme 生成完成！最終尺寸: 1080x1080, 檔案大小: {len(final_bytes)/1024:.1f} KB\")\n\n        else:\n            # 保底紅圖\n            img = Image.new('RGB', (1080, 1080), color=\"#FF0000\")\n            final_bytes = BytesIO()\n            img.save(final_bytes, format=\"JPEG\")\n            final_bytes = final_bytes.getvalue()\n            print(\"❌ 取不到原圖，使用紅色保底\")\n\n        output_items.append({\n            \"json\": {\n                **json_data,\n                \"debug_info\": \"meme 生成成功 (1080x1080 IG 優化)\"\n            },\n            \"binary\": {\n                \"data\": {\n                    \"data\": final_bytes,\n                    \"mimeType\": \"image/jpeg\",\n                    \"fileName\": \"meme.jpg\",\n                    \"fileExtension\": \"jpg\"\n                }\n            }\n        })\n\n    except Exception as e:\n        print(f\"❌ PIL 錯誤: {str(e)}\")\n        output_items.append({\"json\": {**json_data, \"error\": str(e)}})\n\nreturn output_items"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        -464
+      ],
+      "id": "4ae99445-cf24-43ed-a59b-71c85e2cf27c",
+      "name": "Create Meme with PIL"
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v18.0/{{ $node[\"Instagram - Publish Media\"].json[\"id\"] }}",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={\n  \"fields\": \"id,permalink,like_count,comments_count,timestamp,media_type,media_url,caption\",\n  \"access_token\": \"EAAMZAUnlAq3wBQfiglZAjClQ4ZAuSNdRoHEZC3dk8Bh4JA4xzSZCy3WKqniPoTkHaieRkwonZCQsBNcgZCSyrqZAZCkPcGnbrGx0TfslpoBKePbJGv1VBiEr8BduMunj9Db4JySaooj41jCFG6heZAFxm2DtpIaEScitKegy9fmCzvCJLMZCQ0WMtZCmZBUaIm4jgu3WYaahcpgZDZD\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        6400,
+        -464
+      ],
+      "id": "c3ba845b-077d-4e1d-bdd1-2f913839cf0d",
+      "name": "Instagram - Check Status"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v20.0/17841467811092478/media_publish",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"creation_id\": \"{{ $node[\"Instagram - Create Media\"].json.id }}\",\n  \"access_token\": \"EAAMZAUnlAq3wBQfiglZAjClQ4ZAuSNdRoHEZC3dk8Bh4JA4xzSZCy3WKqniPoTkHaieRkwonZCQsBNcgZCSyrqZAZCkPcGnbrGx0TfslpoBKePbJGv1VBiEr8BduMunj9Db4JySaooj41jCFG6heZAFxm2DtpIaEScitKegy9fmCzvCJLMZCQ0WMtZCmZBUaIm4jgu3WYaahcpgZDZD\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        6176,
+        -464
+      ],
+      "id": "b9c410af-c296-4040-9fc6-0e4f9f41321c",
+      "name": "Instagram - Publish Media"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v20.0/17841467811092478/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"image_url\": \"{{ $node[\"Upload to ImgBB\"].json.data.display_url }}\",\n  \"caption\": \"{{ $json.caption || $json.selected_caption || 'AI generated meme' }}\\n\\n#AI生成 #搞笑 #Meme\",\n  \"access_token\": \"EAAMZAUnlAq3wBQfiglZAjClQ4ZAuSNdRoHEZC3dk8Bh4JA4xzSZCy3WKqniPoTkHaieRkwonZCQsBNcgZCSyrqZAZCkPcGnbrGx0TfslpoBKePbJGv1VBiEr8BduMunj9Db4JySaooj41jCFG6heZAFxm2DtpIaEScitKegy9fmCzvCJLMZCQ0WMtZCmZBUaIm4jgu3WYaahcpgZDZD\"\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5920,
+        -464
+      ],
+      "id": "2c57d4c6-397c-4686-b943-c8cfc10b67ab",
+      "name": "Instagram - Create Media",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "cwajW1cqHSXiCFMH",
+          "name": "Unnamed credential 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qLwJ9LFge2-POHZ_BpmsNiuDrOAiR4-X87OXeJm1x1g",
+          "mode": "list",
+          "cachedResultName": "Meme Factory Logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qLwJ9LFge2-POHZ_BpmsNiuDrOAiR4-X87OXeJm1x1g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "工作表1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qLwJ9LFge2-POHZ_BpmsNiuDrOAiR4-X87OXeJm1x1g/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "{{ new Date().toISOString() }}",
+            "post_id": "{{ $json.meme_id }}",
+            "caption": "{{ $json.meme_caption }}",
+            "image_url": "{{ $json.original_image || $json.url }}",
+            "meme_score": "{{ $json.meme_score }}",
+            "engagement_metrics": "{{\\\"likes\\\":0,\\\"comments\\\":0,\\\"shares\\\":0}}",
+            "platform": "instagram",
+            "status": "created"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "post_id",
+              "displayName": "post_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "caption",
+              "displayName": "caption",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "meme_score",
+              "displayName": "meme_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "engagement_metrics",
+              "displayName": "engagement_metrics",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        6624,
+        -464
+      ],
+      "id": "ae559811-958a-4f19-88dc-14b734bfb740",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "g1wYOCKsqLrvF2fv",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 新增節點或修改現有節點\nconst sevenDaysAgo = new Date();\nsevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n\n// 格式化為 Google Drive API 需要的格式\nconst fromDate = sevenDaysAgo.toISOString().split('T')[0] + 'T00:00:00';\n\n// 返回參數給下一個 HTTP Request 節點\nreturn [{\n  json: {\n    // 🔴 重要：替換為你的 Google 相簿資料夾 ID\n    folder_id: \"1n9C68MRqHTYSjUpgtuTNzjFSgqyJ9LGs\",\n    \n    // 7天前的日期\n    from_date: fromDate,  // 格式: 2024-12-14T00:00:00\n    \n    // 其他查詢參數\n    mime_types: \"image/jpeg,image/png,image/gif,image/heic\",\n    page_size: \"100\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -320
+      ],
+      "id": "571045fe-9099-41b6-8937-ac4bd665f79e",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2112,
+        -320
+      ],
+      "id": "8fa7f6f8-1725-41b7-9e1f-119e59ff6b1f",
+      "name": "Loop Over Items (Split In Batches)"
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "q",
+              "value": "=mimeType contains 'image/' and '{{ $json.folder_id }}' in parents and modifiedTime > '{{ $json.from_date }}'"
+            },
+            {
+              "name": "fields",
+              "value": "=files(id, name, mimeType, webContentLink, thumbnailLink, modifiedTime, size, parents)"
+            },
+            {
+              "name": "orderBy",
+              "value": "modifiedTime desc"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        592,
+        -320
+      ],
+      "id": "85d0a5db-7962-4712-95ef-80c8557ee824",
+      "name": "Google drive",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "cwajW1cqHSXiCFMH",
+          "name": "Unnamed credential 2"
+        },
+        "googleOAuth2Api": {
+          "id": "R4cPv7Hi8BxkGQgw",
+          "name": "Google account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.2:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llava:7b\",\n  \"prompt\": \"Analyze this image for meme potential. Be brief. Respond with format: 'Score: X/10 - Desc: [短描述]'\",\n  \"images\": [\n    \"{{ $json.pureBase64ForOllama }}\"\n  ],\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.7\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3408,
+        -464
+      ],
+      "id": "bac79a00-cab8-4562-9039-f45e47cee589",
+      "name": "HTTP Request2 (Ollama Vision)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === 第 12 節點：全自動 Binary 提取器 ===\nconst items = $input.all();\n\nreturn items.map(item => {\n    let base64String = \"\";\n    let source = \"none\";\n\n    // 1. 強制從 Binary 數據層提取 (n8n 嘅圖片真正存放地)\n    if (item.binary) {\n        // 自動搵第一個有效嘅 binary field (例如 'data' 或 'file')\n        const binaryKeys = Object.keys(item.binary);\n        if (binaryKeys.length > 0) {\n            const key = binaryKeys[0];\n            // n8n binary .data 已經係 Base64 格式\n            base64String = item.binary[key].data;\n            source = `binary_${key}`;\n        }\n    }\n\n    // 2. 如果 Binary 冇，先至去 JSON 搵 (最後防線)\n    if (!base64String && item.json.base64Image) {\n        base64String = item.json.base64Image.replace(/^data:image\\/\\w+;base64,/, \"\");\n        source = \"json_field\";\n    }\n\n    // 3. 檢查長度，如果太短 (例如得幾十個字)，代表張圖壞咗\n    if (!base64String || base64String.length < 500) {\n        return {\n            json: {\n                ...item.json,\n                pureBase64ForOllama: null,\n                ready: false,\n                error: \"🚨 搵唔到圖片內容！請確保前面係 Google Drive 'Download' 節點而非 'List'\"\n            }\n        };\n    }\n\n    // 4. 返回乾淨嘅數據畀 Ollama\n    return {\n        json: {\n            ...item.json,\n            pureBase64ForOllama: base64String, // 呢個名要同第 14 節點對應\n            base64_length: base64String.length,\n            base64_source: source,\n            ready: true\n        },\n        binary: item.binary // 傳埋 Binary 落去畀後面嘅 PIL 用\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2768,
+        -464
+      ],
+      "id": "b06084e2-f696-405c-b7bd-723a9d99e3a5",
+      "name": "Fix Base64 for Ollama"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const text = item.json.text || item.json.response || \"\";  // Ollama 回傳字段可能係 text 或 response\n\n  // 用正則表達式提取分數 (Score: X/10)\n  const scoreMatch = text.match(/Score:\\s*(\\d+(\\.\\d+)?)\\/10/i);\n  let memeScore = 0;\n\n  if (scoreMatch && scoreMatch[1]) {\n    memeScore = parseFloat(scoreMatch[1]);\n    console.log(`✅ 成功提取 meme_score: ${memeScore}`);\n  } else {\n    console.log(`⚠️ 無法提取分數，從文字: \"${text}\"，預設給 5`);\n    memeScore = 5;  // 預設中分，避免全丟掉\n  }\n\n  // 提取描述（可選）\n  const descMatch = text.match(/Desc:\\s*(.+)/i);\n  const description = descMatch ? descMatch[1].trim() : \"No description\";\n\n  return {\n    json: {\n      ...item.json,\n      meme_score: memeScore,        // IF node 用呢個數字\n      meme_description: description,\n      ollama_raw_response: text     // 方便 debug\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3632,
+        -464
+      ],
+      "id": "fb4a8f34-d44f-4bb5-91f6-46f6de32e18f",
+      "name": "Parse Meme Score"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === 中間 Debug 節點 (接力版) ===\nconst item = $input.first();\n\n// 在控制台輸出調試資訊\nconsole.log('--- 數據傳輸監控 ---');\nconsole.log('Binary 欄位:', Object.keys(item.binary || {}));\nconsole.log('是否含有圖片數據:', !!item.binary);\n\n// 確保返回完整對象\nreturn {\n    json: item.json,\n    binary: item.binary // 必須顯式傳遞，否則下一站 PIL 會變空\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4976,
+        -464
+      ],
+      "id": "7e03bcef-04d7-42d3-97fe-3c2d62b885fe",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "name": "=meme_{{ $now.format('YYYYMMDD_HHmmss') }}.jpg",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ \"15J2te2-sdrQVz7lp9Liw539O9OP9FRfG\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        144,
+        848
+      ],
+      "id": "d3190995-d9bf-40e9-89c9-41bba1eb8f28",
+      "name": "Upload file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "rh0Oz5y2uOjF5nUr",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -128,
+        208
+      ],
+      "id": "93f48631-8bee-48b9-94f0-eb15ca80596f",
+      "name": "Share file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "rh0Oz5y2uOjF5nUr",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === 第 19 節點：Base64 to Binary (對接修復版) ===\nconst items = $input.all();\n\nreturn items.map(item => {\n  // 1. 修正欄位名稱：對應 Python 節點輸出的 base64Image 或 pureBase64ForOllama\n  // 根據我們之前的邏輯，優先找 base64Image，並去掉 Data URI 前綴\n  let base64String = item.json.base64Image || item.json.meme_base64 || \"\";\n\n  // 如果包含 \"data:image/jpeg;base64,\" 前綴，需要去掉才能正確轉換\n  if (base64String.includes(',')) {\n    base64String = base64String.split(',')[1];\n  }\n\n  let binaryData;\n  let sourceStatus = \"success\";\n\n  if (!base64String || base64String.trim() === \"\") {\n    console.log(\"Warning: No valid Base64 found, using fallback\");\n    // 使用 1x1 灰色像素作為保底，避免節點報錯中斷\n    base64String = \"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN8/R8AAnUBfALm6mMAAAAASUVORK5CYII=\";\n    sourceStatus = \"fallback\";\n  }\n\n  try {\n    binaryData = Buffer.from(base64String, 'base64');\n  } catch (e) {\n    console.error(\"Base64 轉換失敗:\", e);\n    sourceStatus = \"error\";\n    binaryData = Buffer.from(\"\"); \n  }\n\n  return {\n    json: {\n      ...item.json,\n      binary_conversion: sourceStatus,\n      // 增加這個欄位方便 ImgBB 使用\n      has_binary: binaryData.length > 100\n    },\n    binary: {\n      data: {\n        data: binaryData,\n        mimeType: 'image/jpeg',\n        fileName: `meme_${Date.now()}.jpg`\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        192
+      ],
+      "id": "bb0d17e2-1507-4651-a792-8b2c3f674976",
+      "name": "Base64 to Binary"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 修正版：使用 this.helpers.httpRequest\nconst memeBase64 = items[0].json.meme_base64;\n\n// 你的 ImgBB API Key（替換這個！）\nconst imgbbApiKey = 'f25c082385039db8f8f3be0f0fdb0d38';\n\ntry {\n  // 使用正確的語法\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.imgbb.com/1/upload',\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      key: imgbbApiKey,\n      image: memeBase64\n    },\n    json: true  // 自動解析 JSON 響應\n  });\n  \n  // 檢查是否成功\n  if (response.success) {\n    console.log('✅ ImgBB 上傳成功！');\n    console.log('圖片URL:', response.data.url);\n    \n    return [{\n      json: {\n        // Instagram 需要的公開圖片 URL\n        instagram_image_url: response.data.url,\n        \n        // 保留標題和標籤\n        caption: items[0].json.selected_caption || items[0].json.caption || \"AI生成meme\",\n        \n        // 加一些標籤\n        hashtags: \"#AI生成 #搞笑 #Meme #自動生成\",\n        \n        // 原始數據（可選）\n        original_filename: items[0].json.filename,\n        meme_score: items[0].json.meme_score,\n        \n        // 時間戳\n        uploaded_at: new Date().toISOString()\n      }\n    }];\n  } else {\n    console.error('❌ ImgBB 上傳失敗:', response);\n    throw new Error('圖片上傳到 ImgBB 失敗');\n  }\n} catch (error) {\n  console.error('❌ 上傳過程出錯:', error.message);\n  \n  // 返回錯誤信息，不要讓整個流程崩潰\n  return [{\n    json: {\n      error: error.message,\n      instagram_image_url: null,\n      caption: items[0].json.selected_caption || \"圖片上傳失敗\",\n      uploaded_at: new Date().toISOString()\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        400
+      ],
+      "id": "acb51447-6e69-4271-a2ae-cb31067fbac7",
+      "name": "ImgBB"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 節點：調試 Instagram 前的數據\nconsole.log('=== Instagram 節點前數據檢查 ===');\n\n// 1. 顯示所有數據\nconsole.log('完整數據:', JSON.stringify(items[0].json, null, 2));\n\n// 2. 特別檢查圖片URL\nconst imageUrl = items[0].json.instagram_image_url;\nconsole.log('instagram_image_url 值:', imageUrl);\nconsole.log('類型:', typeof imageUrl);\nconsole.log('長度:', imageUrl ? imageUrl.length : 0);\n\n// 3. 檢查是否有其他可能的圖片URL字段\nconsole.log('所有包含 \"image\" 或 \"url\" 的字段:');\nObject.keys(items[0].json).forEach(key => {\n  if (key.toLowerCase().includes('image') || key.toLowerCase().includes('url')) {\n    console.log(`  ${key}:`, items[0].json[key]);\n  }\n});\n\n// 4. 如果沒有 instagram_image_url，嘗試用其他字段\nlet finalImageUrl = imageUrl;\nif (!finalImageUrl || finalImageUrl === '' || finalImageUrl === 'null') {\n  console.log('⚠️ instagram_image_url 無效，尋找替代字段...');\n  \n  // 嘗試其他可能的字段名稱\n  const possibleFields = [\n    'image_url',\n    'meme_direct_url', \n    'url',\n    'direct_url',\n    'img_url',\n    'photo_url'\n  ];\n  \n  for (const field of possibleFields) {\n    if (items[0].json[field]) {\n      console.log(`✅ 找到替代字段: ${field} = ${items[0].json[field]}`);\n      finalImageUrl = items[0].json[field];\n      break;\n    }\n  }\n}\n\n// 5. 確保最終有圖片URL\nif (!finalImageUrl || finalImageUrl === '' || finalImageUrl === 'null') {\n  console.error('❌ 錯誤：找不到有效的圖片URL！');\n  console.log('所有可用字段:', Object.keys(items[0].json));\n  \n  // 創建一個測試URL，讓流程繼續\n  finalImageUrl = `https://picsum.photos/1080/1080?random=${Date.now()}`;\n  console.log(`⚠️ 使用測試圖片: ${finalImageUrl}`);\n}\n\n// 6. 傳遞修正後的數據\nreturn [{\n  json: {\n    // 確保這個字段名稱和 Instagram 節點匹配\n    instagram_image_url: finalImageUrl,\n    \n    // 傳遞所有原始數據\n    ...items[0].json,\n    \n    // 標記是否修正過\n    _debug_fixed_image_url: !imageUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        624
+      ],
+      "id": "0cb5188f-bb21-49d1-ace8-4182dba5abe9",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.imgbb.com/1/upload",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "f25c082385039db8f8f3be0f0fdb0d38"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "image",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5680,
+        -464
+      ],
+      "id": "568735ab-50e5-439d-8975-d1bd2ee45a75",
+      "name": "Upload to ImgBB"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.2:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n     \"model\": \"mistral:7b\",\n     \"prompt\": \"Test connection\",\n     \"stream\": false\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        384,
+        400
+      ],
+      "id": "783cd284-43a6-4fc9-aad2-09dca999a442",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 檢查PIL生成的圖片數據\nconst item = $input.all()[0];\n\nconsole.log('🖼️ 檢查PIL生成結果：');\n\n// 檢查是否有binary數據\nif (item.binary && item.binary.data) {\n  console.log('✅ 有binary數據');\n  console.log('- Binary大小:', item.binary.data.data.length, 'bytes');\n  console.log('- Binary類型:', item.binary.data.mimeType);\n  console.log('- 檔案名稱:', item.binary.data.fileName);\n} else {\n  console.log('❌ 沒有binary數據！');\n}\n\n// 檢查base64\nif (item.json && item.json.base64Image) {\n  const base64 = item.json.base64Image;\n  console.log('✅ 有base64數據');\n  console.log('- Base64長度:', base64.length);\n  console.log('- 前100字符:', base64.substring(0, 100));\n  \n  // 檢查base64格式\n  if (base64.includes('data:image/')) {\n    console.log('📝 Base64有data URI前綴');\n    const mimeType = base64.split(';')[0].replace('data:', '');\n    console.log('- MIME類型:', mimeType);\n  }\n  \n  // 簡單驗證base64\n  try {\n    const cleanBase64 = base64.includes('base64,') ? \n      base64.split('base64,')[1] : base64;\n    const buffer = Buffer.from(cleanBase64, 'base64');\n    console.log('- Base64解碼後大小:', buffer.length, 'bytes');\n    \n    // 額外：檢查圖片是否有效\n    if (buffer.length < 100) {\n      console.log('❌ 警告：圖片數據太小，可能損壞');\n    }\n  } catch (e) {\n    console.log('❌ Base64解碼失敗:', e.message);\n  }\n} else {\n  console.log('❌ 沒有base64數據！');\n}\n\n// 將所有數據原樣傳遞，不修改\nreturn item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5456,
+        -464
+      ],
+      "id": "0039707d-4da1-479f-849e-8ddd2ff2fc2c",
+      "name": "debug"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 檢查Google Drive下載的圖片\nconst item = $input.all()[0];\n\nconsole.log('=== Google Drive下載檢查 ===');\nconsole.log('📥 原始輸入:', Object.keys(item));\n\n// 檢查是否有binary數據\nif (item.binary) {\n  const binaryKeys = Object.keys(item.binary);\n  console.log(`✅ 有binary數據: ${binaryKeys.length}個文件`);\n  \n  binaryKeys.forEach(key => {\n    const binaryData = item.binary[key];\n    console.log(`文件 \"${key}\":`);\n    console.log(`  - 大小: ${binaryData.data?.length || 0} bytes`);\n    console.log(`  - MIME類型: ${binaryData.mimeType || '未知'}`);\n    console.log(`  - 檔案名: ${binaryData.fileName || '未知'}`);\n    \n    // 檢查是否為圖片\n    const isImage = binaryData.mimeType?.startsWith('image/');\n    console.log(`  - 是否圖片: ${isImage ? '✅ 是' : '❌ 否'}`);\n    \n    if (binaryData.data && binaryData.data.length > 0) {\n      // 嘗試轉換為base64並取前100字符檢查\n      const base64 = Buffer.from(binaryData.data).toString('base64');\n      console.log(`  - Base64前100字符: ${base64.substring(0, 100)}...`);\n    }\n  });\n} else {\n  console.log('❌ 沒有binary數據！Google Drive可能下載失敗');\n}\n\n// 添加標記以便追蹤\nreturn {\n  json: {\n    ...item.json,\n    _debug_google_drive: {\n      has_binary: !!item.binary,\n      binary_count: item.binary ? Object.keys(item.binary).length : 0,\n      timestamp: new Date().toISOString()\n    }\n  },\n  binary: item.binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -320
+      ],
+      "id": "75857dfc-01b3-4346-ac68-577145fc3d24",
+      "name": "debug1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 檢查第一次JS處理後的數據\nconst item = $input.all()[0];\n\nconsole.log('=== 第一次JS處理檢查 ===');\nconsole.log('JSON keys:', Object.keys(item.json));\n\n// 檢查base64Image是否存在\nif (item.json.base64Image) {\n  console.log('✅ 有base64Image');\n  const base64 = item.json.base64Image;\n  console.log(`- 長度: ${base64.length}`);\n  console.log(`- 是否有前綴: ${base64.includes('data:image/') ? '是' : '否'}`);\n  \n  // 嘗試解碼檢查\n  try {\n    const cleanBase64 = base64.includes('base64,') ? \n      base64.split('base64,')[1] : base64;\n    const buffer = Buffer.from(cleanBase64, 'base64');\n    console.log(`- 解碼後大小: ${buffer.length} bytes`);\n    \n    if (buffer.length < 1000) {\n      console.log('⚠️ 警告：圖片數據非常小，可能損壞');\n    }\n  } catch (e) {\n    console.log(`❌ Base64解碼失敗: ${e.message}`);\n  }\n} else {\n  console.log('❌ 沒有base64Image！');\n}\n\n// 檢查pureBase64ForOllama\nif (item.json.pureBase64ForOllama) {\n  console.log('✅ 有pureBase64ForOllama');\n  console.log(`- 長度: ${item.json.pureBase64ForOllama.length}`);\n} else {\n  console.log('❌ 沒有pureBase64ForOllama');\n}\n\n// 檢查binary是否還在\nif (item.binary) {\n  console.log('✅ binary數據還在');\n} else {\n  console.log('⚠️ binary數據可能已丟失');\n}\n\nreturn item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        -320
+      ],
+      "id": "71260921-625a-454b-b219-f4fe240d6235",
+      "name": "debug2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 檢查修復後的Ollama base64\nconst item = $input.all()[0];\n\nconsole.log('=== Ollama Base64修復檢查 ===');\nconsole.log('JSON keys:', Object.keys(item.json));\n\n// 特別檢查pureBase64ForOllama\nif (item.json.pureBase64ForOllama) {\n  const pureBase64 = item.json.pureBase64ForOllama;\n  console.log(`✅ pureBase64ForOllama: ${pureBase64.length} 字符`);\n  \n  // 詳細分析\n  console.log('🔬 Base64分析:');\n  console.log(`- 是否純Base64: ${!pureBase64.includes('data:image/') ? '✅ 是' : '❌ 否'}`);\n  console.log(`- 是否含空格/換行: ${/\\s/.test(pureBase64) ? '❌ 是' : '✅ 否'}`);\n  \n  // 嘗試解碼\n  try {\n    const buffer = Buffer.from(pureBase64, 'base64');\n    console.log(`- 解碼大小: ${buffer.length} bytes`);\n    console.log(`- 大約像素數: ${Math.sqrt(buffer.length / 3)}x${Math.sqrt(buffer.length / 3)}`);\n    \n    if (buffer.length < 5000) {\n      console.log('❌ 嚴重：圖片數據太小，不足以生成meme');\n      console.log('可能原因:');\n      console.log('1. 原始圖片下載失敗');\n      console.log('2. Base64轉換有問題');\n      console.log('3. 數據在傳遞中丟失');\n    } else {\n      console.log(`✅ 圖片數據足夠 (${Math.round(buffer.length/1024)} KB)`);\n    }\n  } catch (e) {\n    console.log(`❌ Base64解碼錯誤: ${e.message}`);\n  }\n} else {\n  console.log('❌❌❌ 嚴重：沒有pureBase64ForOllama！');\n}\n\n// 檢查原始base64Image\nif (item.json.base64Image) {\n  console.log(`📝 base64Image: ${item.json.base64Image.length} 字符`);\n} else {\n  console.log('❌ 沒有base64Image');\n}\n\nreturn item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2976,
+        -464
+      ],
+      "id": "9c05a384-5da6-4571-ad87-ffd7da5970bc",
+      "name": "debug3"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.downloadUrl }}",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "file",
+              "outputPropertyName": "binary"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2544,
+        -464
+      ],
+      "id": "383b8bb7-563b-41bc-8d2c-616d5fbea3b1",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 取得所有輸入項目\nconst items = $input.all();\n\nfor (let i = 0; i < items.length; i++) {\n  try {\n    // 1. 自動尋找 Binary 欄位名稱 (通常是 'data')\n    const binaryKeys = Object.keys(items[i].binary || {});\n    \n    if (binaryKeys.length > 0) {\n      // 2. 使用 n8n 推薦的新版 helper 獲取 Buffer\n      const binaryData = await this.helpers.getBinaryDataBuffer(i, binaryKeys[0]);\n      \n      // 3. 轉成 Base64 並存入 JSON\n      items[i].json.raw_base64 = binaryData.toString('base64');\n      \n      // 這裡做個小標記，方便你 debug 看到圖片長度\n      items[i].json.image_packed = \"Success (len: \" + items[i].json.raw_base64.length + \")\";\n    } else {\n      items[i].json.image_packed = \"Error: No binary data found in this item\";\n    }\n  } catch (error) {\n    items[i].json.image_packed = \"Error: \" + error.message;\n  }\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3184,
+        -464
+      ],
+      "id": "a689be77-7e44-429a-b8b2-1ae726bf816a",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"nodes\": [\n    {\n      \"parameters\": {\n        \"mode\": \"manual\",\n        \"includeOtherFields\": true,\n        \"fields\": {\n          \"values\": [\n            {\n              \"name\": \"original_image_base64\",\n              \"stringValue\": \"={{ $binary.data.data.toString('base64') }}\"\n            }\n          ]\n        }\n      },\n      \"id\": \"pass-original-image\",\n      \"name\": \"Pass Original Image\",\n      \"type\": \"n8n-nodes-base.set\",\n      \"typeVersion\": 3,\n      \"position\": [800, 300]\n    }\n  ]\n}",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1888,
+        -320
+      ],
+      "id": "7f1a2985-356b-43c4-aa11-c3a4793f2e6d",
+      "name": "Pass Original Image"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "debug2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Pass Original Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items (Split In Batches)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Generate Meme Captions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank Best Caption": {
+      "main": [
+        [
+          {
+            "node": "Select Best Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Captions": {
+      "main": [
+        [
+          {
+            "node": "Rank Best Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Meme Captions": {
+      "main": [
+        [
+          {
+            "node": "Parse Captions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Best Caption": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Meme with PIL": {
+      "main": [
+        [
+          {
+            "node": "debug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram - Publish Media": {
+      "main": [
+        [
+          {
+            "node": "Instagram - Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram - Create Media": {
+      "main": [
+        [
+          {
+            "node": "Instagram - Publish Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram - Check Status": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Google drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items (Split In Batches)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google drive": {
+      "main": [
+        [
+          {
+            "node": "debug1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2 (Ollama Vision)": {
+      "main": [
+        [
+          {
+            "node": "Parse Meme Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fix Base64 for Ollama": {
+      "main": [
+        [
+          {
+            "node": "debug3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Meme Score": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Create Meme with PIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base64 to Binary": {
+      "main": [
+        []
+      ]
+    },
+    "Upload to ImgBB": {
+      "main": [
+        [
+          {
+            "node": "Instagram - Create Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "debug": {
+      "main": [
+        [
+          {
+            "node": "Upload to ImgBB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "debug1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "debug2": {
+      "main": [
+        [
+          {
+            "node": "Sort",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "debug3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Fix Base64 for Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2 (Ollama Vision)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Original Image": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items (Split In Batches)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f035a0fd-5906-460a-9dd6-b7b7661c83ea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d0c1bf24d13c76f61b42dc2407c4ec8e50557d17a30965864d4592cb251ed06e"
+  },
+  "id": "zbgi7Yqi2V7eDSSS",
+  "tags": []
+}
